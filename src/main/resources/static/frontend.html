@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>User Tracker</title>
+</head>
+<body>
+<h3>Live User Locations:</h3>
+<div id="output">Waiting...</div>
+
+<script>
+    const socket = new WebSocket("ws://localhost:8085/frontend-stream");
+    const latestLocations = {};
+
+    socket.onopen = () => console.log("✅ Connected to WebSocket");
+    socket.onerror = (err) => console.error("❌ WebSocket error:", err);
+
+    socket.onmessage = (event) => {
+      try {
+        let data = JSON.parse(event.data);
+        const updates = Array.isArray(data) ? data : [data];
+
+        updates.forEach(loc => {
+          latestLocations[loc.userId] = loc;
+        });
+
+        const html = Object.values(latestLocations)
+          .map(loc => `📍 ${loc.userId} : Lat=${loc.latitude}, Lng=${loc.longitude}`)
+          .join("<br>");
+
+        document.getElementById("output").innerHTML = html;
+      } catch (err) {
+        console.error("Parsing error:", err, event.data);
+      }
+    };
+</script>
+
+</body>
+</html>
