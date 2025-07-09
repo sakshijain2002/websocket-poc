@@ -20,7 +20,7 @@ public class LocationModel {
 
     @Id
     private String userId;
-
+    private String patrollingId;
     private double latitude;
     private double longitude;
     private LocalDateTime timestamp;

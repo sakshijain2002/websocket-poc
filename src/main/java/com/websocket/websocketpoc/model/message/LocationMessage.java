@@ -8,8 +8,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class LocationMessage {
-
     private String userId;
+    private String patrollingId;
     private double latitude;
     private double longitude;
 }
