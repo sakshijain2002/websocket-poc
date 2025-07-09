@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.*;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -73,7 +74,20 @@ public class S3LocationService {
     }
 
     public Mono<List<LocationModel>> getLocationDataByUser(String patrollingId, String userId) {
-        String key = String.format("location-logs/%s/%s.json", patrollingId, userId);
-        return getLocationDataByKey(key);
+        String prefix = String.format("location-logs/%s/", patrollingId);
+
+        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                .bucket(bucketName)
+                .prefix(prefix)
+                .build();
+
+        return Mono.fromFuture(s3Client.listObjectsV2(listRequest))
+                .flatMapMany(response -> Flux.fromIterable(response.contents()))
+                .filter(obj -> obj.key().contains("/" + userId + "-")) // Only that user's files
+                .flatMap(obj -> getLocationDataByKey(obj.key()))       // Read each file
+                .flatMap(Flux::fromIterable)                           // Flatten list
+                .sort(Comparator.comparing(LocationModel::getTimestamp)) // Optional: sort
+                .collectList();
     }
+
 }

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.websocket.websocketpoc.model.LocationModel;
 import com.websocket.websocketpoc.model.message.LocationMessage;
 import com.websocket.websocketpoc.repository.LocationRepository;
+import com.websocket.websocketpoc.service.LocationRedisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,6 +41,7 @@ public class LocationWebSocketHandler {
     private final List<FluxSink<String>> frontendSinks = new CopyOnWriteArrayList<>();
     private final LocationRepository locationRepository;
     private final S3AsyncClient s3AsyncClient;
+    private final LocationRedisService redisService;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -49,7 +51,7 @@ public class LocationWebSocketHandler {
     private String bucketName;
 
     private final ConcurrentMap<String, LocationModel> latestLocationMap = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, List<LocationModel>> bufferedForS3 = new ConcurrentHashMap<>();
+
 
     public WebSocketHandler appHandler() {
         return session -> session.receive()
@@ -70,11 +72,15 @@ public class LocationWebSocketHandler {
                         latestLocationMap.put(sessionUserKey, location);
                         Mono<LocationModel> dbSave = locationRepository.save(location);
 
-                        bufferedForS3.computeIfAbsent(sessionUserKey, k -> new ArrayList<>()).add(location);
+                        // ✅ Save to Redis Stream
+                        Mono<String> redisSave = redisService.saveLocationToStream(location)
+                                .doOnSuccess(id -> log.info("✅ saved data in redis: {}", id))
+                                .doOnError(e -> log.error("❌ Redis me save karne me error", e));
 
-                        return dbSave.doOnSuccess(saved -> {
+
+                        return Mono.zip(dbSave, redisSave).doOnSuccess(tuple -> {
                             try {
-                                String json = objectMapper.writeValueAsString(List.of(saved));
+                                String json = objectMapper.writeValueAsString(List.of(location));
                                 frontendSinks.forEach(sink -> {
                                     if (!sink.isCancelled()) sink.next(json);
                                 });
@@ -86,10 +92,8 @@ public class LocationWebSocketHandler {
                         log.error("Failed to process incoming message", e);
                         return Mono.empty();
                     }
-                })
-                .then();
+                }).then();
     }
-
     public WebSocketHandler frontendHandler() {
         return session -> {
             Flux<String> output = Flux.<String>create(sink -> {
@@ -117,72 +121,9 @@ public class LocationWebSocketHandler {
         };
     }
 
-    public void persistsBufferedDataToS3() {
-        bufferedForS3.forEach((key, newLocations) -> {
-            if (newLocations.isEmpty()) return;
-
-            String[] parts = key.split("-", 2);
-            String patrollingId = parts[0];
-            String userId = parts[1];
-            String keyPath = String.format("location-logs/%s/%s.json", patrollingId, userId);
-
-            getExistingLocationsFromS3(keyPath)
-                    .defaultIfEmpty(new ArrayList<>())
-                    .flatMap(existingLocations -> {
-                        existingLocations.addAll(newLocations);
-                        try {
-                            String mergedJson = objectMapper.writeValueAsString(existingLocations);
-                            return uploadToS3(keyPath, mergedJson)
-                                    .doOnSuccess(resp -> {
-                                        log.info("Successfully uploaded {} entries to S3 at {}", existingLocations.size(), keyPath);
-                                        newLocations.clear();
-                                    });
-                        } catch (JsonProcessingException e) {
-                            log.error("Error serializing merged locations", e);
-                            return Mono.empty();
-                        }
-                    })
-                    .subscribe(); // trigger the chain
-        });
-    }
-
-    private Mono<List<LocationModel>> getExistingLocationsFromS3(String keyPath) {
-        GetObjectRequest getRequest = GetObjectRequest.builder()
-                .bucket(bucketName)
-                .key(keyPath)
-                .build();
-
-        return Mono.fromFuture(s3AsyncClient.getObject(getRequest, AsyncResponseTransformer.toBytes()))
-                .flatMap(responseBytes -> {
-                    String json = responseBytes.asUtf8String();
-                    try {
-                        List<LocationModel> locations = objectMapper.readValue(json, new TypeReference<>() {});
-                        return Mono.just(locations);
-                    } catch (JsonProcessingException e) {
-                        log.error("Error parsing JSON from S3 for key: {}", keyPath, e);
-                        return Mono.empty(); // or fallback to emptyList()
-                    }
-                })
-                .onErrorResume(NoSuchKeyException.class, ex -> {
-                    log.info("No existing S3 file found for {}, creating new", keyPath);
-                    return Mono.empty();
-                })
-                .onErrorResume(ex -> {
-                    log.warn("Failed to fetch or parse existing S3 file for {}", keyPath, ex);
-                    return Mono.empty();
-                });
-    }
 
 
-    private Mono<PutObjectResponse> uploadToS3(String keyPath, String json) {
-        PutObjectRequest putRequest = PutObjectRequest.builder()
-                .bucket(bucketName)
-                .key(keyPath)
-                .contentType("application/json")
-                .build();
 
-        return Mono.fromFuture(
-                s3AsyncClient.putObject(putRequest, AsyncRequestBody.fromString(json))
-        );
-    }
+
+
 }
