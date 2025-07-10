@@ -75,7 +75,7 @@ public class LocationWebSocketHandler {
                         // ✅ Save to Redis Stream
                         Mono<String> redisSave = redisService.saveLocationToStream(location)
                                 .doOnSuccess(id -> log.info("✅ saved data in redis: {}", id))
-                                .doOnError(e -> log.error("❌ Redis me save karne me error", e));
+                                .doOnError(e -> log.error("❌ error in saving data", e));
 
 
                         return Mono.zip(dbSave, redisSave).doOnSuccess(tuple -> {
