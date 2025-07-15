@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 public class LocationMessage {
     private String userId;
     private String patrollingId;
+    private String routeId;
     private double latitude;
     private double longitude;
 }

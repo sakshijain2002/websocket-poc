@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.websocket.websocketpoc.model.LocationModel;
 import com.websocket.websocketpoc.model.message.LocationMessage;
-import com.websocket.websocketpoc.repository.LocationRepository;
+
 import com.websocket.websocketpoc.service.LocationRedisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,8 +39,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class LocationWebSocketHandler {
 
     private final List<FluxSink<String>> frontendSinks = new CopyOnWriteArrayList<>();
-    private final LocationRepository locationRepository;
-    private final S3AsyncClient s3AsyncClient;
+
     private final LocationRedisService redisService;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
@@ -59,57 +58,45 @@ public class LocationWebSocketHandler {
                 .flatMap(payload -> {
                     try {
                         LocationMessage msg = objectMapper.readValue(payload, LocationMessage.class);
-                        String sessionUserKey = msg.getPatrollingId() + "-" + msg.getUserId();
-
+                        String sessionUserKey = msg.getPatrollingId() + "_" + msg.getRouteId() + "_" + msg.getUserId();
                         LocationModel location = LocationModel.builder()
                                 .userId(msg.getUserId())
                                 .latitude(msg.getLatitude())
                                 .longitude(msg.getLongitude())
                                 .timestamp(LocalDateTime.now())
                                 .patrollingId(msg.getPatrollingId())
+                                .routeId(msg.getRouteId())
                                 .build();
 
                         latestLocationMap.put(sessionUserKey, location);
-                        Mono<LocationModel> dbSave = locationRepository.save(location);
 
-                        // ✅ Save to Redis Stream
-                        Mono<String> redisSave = redisService.saveLocationToStream(location)
+                        //  Save to Redis Stream only
+                        return redisService.saveLocationToStream(location)
                                 .doOnSuccess(id -> log.info("✅ saved data in redis: {}", id))
-                                .doOnError(e -> log.error("❌ Redis me save karne me error", e));
+                                .doOnError(e -> log.error("Error saving to Redis", e))
+                                .doOnSuccess(id -> {
+                                    try {
+                                        String json = objectMapper.writeValueAsString(List.of(location));
+                                        frontendSinks.forEach(sink -> {
+                                            if (!sink.isCancelled()) sink.next(json);
+                                        });
+                                    } catch (JsonProcessingException ex) {
+                                        log.error("Error serializing message for frontend", ex);
+                                    }
+                                })
+                                .then();
 
-
-                        return Mono.zip(dbSave, redisSave).doOnSuccess(tuple -> {
-                            try {
-                                String json = objectMapper.writeValueAsString(List.of(location));
-                                frontendSinks.forEach(sink -> {
-                                    if (!sink.isCancelled()) sink.next(json);
-                                });
-                            } catch (JsonProcessingException ex) {
-                                log.error("Error serializing message for frontend", ex);
-                            }
-                        }).then();
                     } catch (Exception e) {
                         log.error("Failed to process incoming message", e);
                         return Mono.empty();
                     }
                 }).then();
     }
+
     public WebSocketHandler frontendHandler() {
         return session -> {
             Flux<String> output = Flux.<String>create(sink -> {
                 frontendSinks.add(sink);
-
-                locationRepository.findAll()
-                        .collectList()
-                        .flatMap(list -> {
-                            try {
-                                return Mono.just(objectMapper.writeValueAsString(list));
-                            } catch (JsonProcessingException e) {
-                                log.error("Error serializing initial data for frontend", e);
-                                return Mono.empty();
-                            }
-                        })
-                        .subscribe(sink::next, error -> log.error("Error sending data to frontend", error));
 
                 sink.onDispose(() -> {
                     frontendSinks.remove(sink);
@@ -120,10 +107,5 @@ public class LocationWebSocketHandler {
             return session.send(output.map(session::textMessage));
         };
     }
-
-
-
-
-
 
 }

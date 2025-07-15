@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Plot S3 JSON Location History on Google Map</title>
+  <style>
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script>
+  // ✅ Add all your signed S3 URLs here
+  const s3Urls = [
+<!--    "https://copmap-prod-loki-logs.s3.ap-south-1.amazonaws.com/DriverLocation/patrol-123/route-456_user-789_20250712T081530021.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250712T083829Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIA3LFAYJMBZV4O4MOR%2F20250712%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=106b2405a0551f154437726ad7b1870448566a521de10e4c79d55e48a97f3a22",-->
+<!--    "https://copmap-prod-loki-logs.s3.ap-south-1.amazonaws.com/DriverLocation/patrol-123/route-456_user-789_20250712T081500023.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250712T083829Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIA3LFAYJMBZV4O4MOR%2F20250712%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=d58b707c7df5028c0baafadd6c387e1f015a1e0fed843fc3fe49973a4ee26b84",-->
+<!--    "https://copmap-prod-loki-logs.s3.ap-south-1.amazonaws.com/DriverLocation/patrol-123/route-456_user-789_20250712T081430014.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250712T083829Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIA3LFAYJMBZV4O4MOR%2F20250712%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=f8c90a901df0950cd04b7c1961ed0329f53c7f71fefd500e1d73aa0837496b63"-->
+"https://copmap-prod-loki-logs.s3.ap-south-1.amazonaws.com/DriverLocation/patrol-123/route-456_user-789_20250712T114838596.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250712T115007Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIA3LFAYJMBZV4O4MOR%2F20250712%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=a6dd764ddb1032546b498da817bff276be54f262cf4a3712ce27e4dbb063c09b",
+"https://copmap-prod-loki-logs.s3.ap-south-1.amazonaws.com/DriverLocation/patrol-123/route-456_user-789_20250712T114808605.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250712T115007Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIA3LFAYJMBZV4O4MOR%2F20250712%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=1236b4f8cf0e4162f6ec7a6a35154a01f06a667a58cbbc3b54c61f0b235eedd7",
+"https://copmap-prod-loki-logs.s3.ap-south-1.amazonaws.com/DriverLocation/patrol-123/route-456_user-789_20250712T114738607.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250712T115007Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIA3LFAYJMBZV4O4MOR%2F20250712%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=6369ad007388d45e35effdbc4c00444b1aa64168b51f4c2fe9fe712230d10d77"
+  ];
+
+  let map;
+
+  async function initMap() {
+    let allPoints = [];
+
+    for (const url of s3Urls) {
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          allPoints.push(...data);  // Keep full data including timestamp
+        }
+      } catch (err) {
+        console.error("❌ Failed to load:", url, err);
+      }
+    }
+
+    if (allPoints.length === 0) {
+      alert("No location data found.");
+      return;
+    }
+
+    // ✅ Sort points by timestamp
+    allPoints.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    // 📍 Extract only coordinates for plotting
+    const pathCoords = allPoints.map(p => ({ lat: p.latitude, lng: p.longitude }));
+
+    // 🗺️ Initialize the map
+    map = new google.maps.Map(document.getElementById("map"), {
+      zoom: 14,
+      center: pathCoords[0],
+    });
+
+    // 🔴 Draw the full route
+    new google.maps.Polyline({
+      path: pathCoords,
+      map: map,
+      strokeColor: "#FF0000",
+      strokeOpacity: 1.0,
+      strokeWeight: 3,
+    });
+
+    // 📌 Start Marker
+    new google.maps.Marker({
+      position: pathCoords[0],
+      map: map,
+      label: "S",
+    });
+
+    // 📌 End Marker
+    new google.maps.Marker({
+      position: pathCoords[pathCoords.length - 1],
+      map: map,
+      label: "E",
+    });
+
+    // 🔍 Auto zoom to fit all points
+    const bounds = new google.maps.LatLngBounds();
+    pathCoords.forEach(p => bounds.extend(p));
+    map.fitBounds(bounds);
+  }
+</script>
+
+<!-- ✅ Load Google Maps API with your key -->
+<script
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCp4WjcoH299TuSTSc-ajrlTpjcNHvYKN0&callback=initMap"
+        async defer>
+</script>
+</body>
+</html>

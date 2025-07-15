@@ -37,7 +37,8 @@ public class LocationRedisService {
                 "latitude", String.valueOf(location.getLatitude()),
                 "longitude", String.valueOf(location.getLongitude()),
                 "timestamp", location.getTimestamp().toString(),
-                "patrollingId", location.getPatrollingId()
+                "patrollingId", location.getPatrollingId(),
+                "routeId", location.getRouteId()
         );
 
         log.info("📝 Writing to Redis Stream: {}", map);
@@ -49,13 +50,4 @@ public class LocationRedisService {
                 .doOnError(e -> log.error("❌ Redis Stream write fail", e));
     }
 
-
-    public Flux<MapRecord<String, String, String>> readAllFromStream() {
-        return redisTemplate.<String, String>opsForStream()
-                .read(StreamOffset.fromStart(redisStreamKey));
-    }
-
-    public Mono<Long> deleteStream() {
-        return redisTemplate.delete(redisStreamKey);
-    }
 }

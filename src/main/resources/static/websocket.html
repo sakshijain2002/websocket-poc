@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head><title>WebSocket Live Tracking</title></head>
+<body>
+<h2>WebSocket Tracking Client</h2>
+<script>
+    const socket = new WebSocket("ws://localhost:8085/app-stream");
+
+    socket.onopen = () => {
+      console.log("✅ Connected to WebSocket");
+
+      let latitude = 28.6139;
+      let longitude = 77.2090;
+
+      setInterval(() => {
+        const message = {
+          patrollingId: "patrol-123",
+          routeId: "route-456",
+          userId: "user-789",
+          latitude: latitude + (Math.random() * 0.001),
+          longitude: longitude + (Math.random() * 0.001),
+        };
+
+        socket.send(JSON.stringify(message));
+        console.log("📤 Sent:", message);
+      }, 2000); // Every 2 seconds
+    };
+
+    socket.onmessage = (event) => {
+      console.log("📥 Received:", event.data);
+    };
+
+    socket.onerror = (error) => {
+      console.error("❌ WebSocket error", error);
+    };
+
+    socket.onclose = () => {
+      console.warn("🔌 WebSocket closed");
+    };
+</script>
+</body>
+</html>
